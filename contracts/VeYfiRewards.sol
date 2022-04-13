@@ -17,6 +17,9 @@ contract VeYfiRewards is BaseGauge {
     address public veToken;
     event UpdatedVeToken(address ve);
 
+    mapping(address => uint256) public snapshotBalances;
+    uint256 public totalSnapshotedSupply;
+
     constructor(
         address _veToken,
         address _rewardToken,
@@ -40,6 +43,13 @@ contract VeYfiRewards is BaseGauge {
         if (account != address(0)) {
             rewards[account] = _earnedReward(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
+
+            totalSnapshotedSupply -= snapshotBalances[account];
+            uint256 newBalance = IVotingEscrow(veToken).balanceOf(account);
+
+            snapshotBalances[account] = newBalance;
+            totalSnapshotedSupply += newBalance;
+
             emit UpdatedRewards(
                 account,
                 rewardPerTokenStored,
@@ -64,7 +74,7 @@ contract VeYfiRewards is BaseGauge {
 
     function _earnedReward(address account) internal view returns (uint256) {
         return
-            (IVotingEscrow(veToken).balanceOf(account) *
+            (snapshotBalances[account] *
                 (_rewardPerToken() - userRewardPerTokenPaid[account])) /
             1e18 +
             rewards[account];
@@ -83,12 +93,24 @@ contract VeYfiRewards is BaseGauge {
         @dev called by veYFI
      *  @return true
      */
-    function rewardCheckpoint(address _account)
+    function preDepositSnapshot(address _account)
         external
         updateReward(_account)
         returns (bool)
     {
         require(msg.sender == address(veToken), "!authorized");
+
+        return true;
+    }
+
+    function postDepositSnapshot(address _account) external returns (bool) {
+        require(msg.sender == address(veToken), "!authorized");
+
+        totalSnapshotedSupply -= snapshotBalances[_account];
+        uint256 newBalance = IVotingEscrow(veToken).balanceOf(_account);
+
+        snapshotBalances[_account] = newBalance;
+        totalSnapshotedSupply += newBalance;
 
         return true;
     }

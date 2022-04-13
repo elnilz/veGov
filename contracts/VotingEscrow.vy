@@ -47,7 +47,8 @@ interface ERC20:
     def approve(spender: address, amount: uint256) -> bool: nonpayable
 
 interface IVeYfiRewards:
-    def rewardCheckpoint(_account: address) -> bool: nonpayable
+    def preDepositSnapshot(_account: address) -> bool: nonpayable
+    def postDepositSnapshot(_account: address) -> bool: nonpayable
     def queueNewRewards(_amount: uint256) -> bool: nonpayable
 
 interface Migrator:
@@ -398,7 +399,7 @@ def _deposit_for(_from: address, _addr: address, _value: uint256, unlock_time: u
     assert(self.migration == False) # dev: must migrate
     _locked: LockedBalance = locked_balance
     supply_before: uint256 = self.supply
-    IVeYfiRewards(self.reward_pool).rewardCheckpoint(_addr) # Reward pool snapshot
+    IVeYfiRewards(self.reward_pool).preDepositSnapshot(_addr) # Reward pool snapshot
 
     self.supply = supply_before + _value
     old_locked: LockedBalance = _locked
@@ -416,6 +417,7 @@ def _deposit_for(_from: address, _addr: address, _value: uint256, unlock_time: u
 
     if _value != 0:
         assert ERC20(self.token).transferFrom(_from, self, _value)
+    IVeYfiRewards(self.reward_pool).postDepositSnapshot(_addr) # Reward pool snapshot
 
     log Deposit(_from, _addr, _value, _locked.end, type, block.timestamp)
     log Supply(supply_before, supply_before + _value)
