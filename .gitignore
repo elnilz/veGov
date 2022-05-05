@@ -1,12 +1,14 @@
-__pycache__
+# Environment variables
 .env
-.history
-.hypothesis/
-.build/
-reports/
-node_modules
-package-lock.json
-yarn-error.log
-artifacts
-contracts/.cache
+
+# MacOS
 .DS_Store
+
+# Node
+node_modules
+
+# Dapptools
+out/
+
+# Foundry
+cache/
