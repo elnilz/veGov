@@ -42,7 +42,7 @@ def test_gauge_yfi_distribution_full_rewards(
     assert pytest.approx(yfi.balanceOf(whale), rel=5 * 10e-4) == yfi_to_distribute / (
         14 * 24
     )
-    assert gauge.queuedPenalty() == 0
+    assert gauge.queuedVeYfiRewards() == 0
     assert gauge.queuedRewards() == 0
 
 
@@ -81,57 +81,16 @@ def test_gauge_yfi_distribution_no_boost(
 
     assert (
         pytest.approx(yfi.balanceOf(whale), rel=5 * 10e-4)
-        == yfi_to_distribute / (14 * 24) * 0.4
+        == yfi_to_distribute / (14 * 24) * 0.1
     )
-    assert gauge.queuedPenalty() == 0
-    assert (
-        pytest.approx(gauge.queuedRewards(), rel=10e-4)
-        == yfi_to_distribute / (14 * 24) * 0.6
-    )
-
-
-def test_gauge_yfi_distribution_no_lock_no_rewards(
-    yfi, ve_yfi, whale, panda, whale_amount, create_vault, create_gauge, gov
-):
-    yfi.approve(ve_yfi, whale_amount, sender=whale)
-    ve_yfi.create_lock(
-        whale_amount, chain.pending_timestamp + 4 * 3600 * 24 * 365, sender=whale
-    )
-    lp_amount = 10**18
-    vault = create_vault()
-    gauge = create_gauge(vault)
-
-    vault.mint(panda, lp_amount, sender=gov)
-    vault.approve(gauge, lp_amount, sender=panda)
-    gauge.deposit(sender=panda)
-
-    vault.mint(panda, lp_amount, sender=gov)
-    vault.approve(gauge, lp_amount, sender=panda)
-    gauge.deposit(sender=panda)
-
-    yfi_to_distribute = 10**16
-    yfi.mint(gov, yfi_to_distribute, sender=gov)
-    yfi.approve(gauge, yfi_to_distribute, sender=gov)
-
-    gauge.queueNewRewards(yfi_to_distribute, sender=gov)
-    assert pytest.approx(gauge.rewardRate()) == yfi_to_distribute / (14 * 24 * 3600)
-    chain.pending_timestamp += 3600
-    gauge.getReward(sender=panda)
-    assert gauge.lockingRatio(panda) == 0
-
-    assert yfi.balanceOf(panda) == 0
 
     assert (
-        pytest.approx(gauge.queuedPenalty(), rel=10e-4)
-        == yfi_to_distribute / (14 * 24) * 0.4
-    )
-    assert (
-        pytest.approx(gauge.queuedRewards(), rel=10e-4)
-        == yfi_to_distribute / (14 * 24) * 0.6
+        pytest.approx(gauge.queuedVeYfiRewards(), rel=10e-4)
+        == yfi_to_distribute / (14 * 24) * 0.9
     )
 
 
-def test_gauge_yfi_distribution_max_boost_only_two_years_lock(
+def test_boost_lock(
     yfi,
     ve_yfi,
     whale,
@@ -142,19 +101,17 @@ def test_gauge_yfi_distribution_max_boost_only_two_years_lock(
     panda,
     gov,
 ):
+
     yfi.approve(ve_yfi, whale_amount, sender=whale)
     ve_yfi.create_lock(
-        whale_amount, chain.pending_timestamp + 2 * 3600 * 24 * 365, sender=whale
+        whale_amount, chain.pending_timestamp + 4 * 3600 * 24 * 365, sender=whale
     )
+
     assert yfi.balanceOf(whale) == 0
 
     lp_amount = 10**18
     vault = create_vault()
     gauge = create_gauge(vault)
-
-    vault.mint(whale, lp_amount, sender=gov)
-    vault.approve(gauge, lp_amount, sender=whale)
-    gauge.deposit(sender=whale)
 
     vault.mint(whale, lp_amount, sender=gov)
     vault.approve(gauge, lp_amount, sender=whale)
@@ -167,31 +124,25 @@ def test_gauge_yfi_distribution_max_boost_only_two_years_lock(
     gauge.queueNewRewards(yfi_to_distribute, sender=gov)
     assert pytest.approx(gauge.rewardRate()) == yfi_to_distribute / (14 * 24 * 3600)
     chain.pending_timestamp += 3600
+
+    yfi.mint(panda, whale_amount, sender=panda)
+    yfi.approve(ve_yfi, whale_amount, sender=panda)
+    ve_yfi.create_lock(
+        whale_amount, chain.pending_timestamp + 4 * 3600 * 24 * 365, sender=panda
+    )
+
     gauge.getReward(sender=whale)
 
-    assert pytest.approx(gauge.lockingRatio(whale), rel=10e-2) == 500_000
-
+    assert pytest.approx(yfi.balanceOf(whale), rel=10e-3) == yfi_to_distribute / (
+        14 * 24
+    )
+    assert gauge.queuedVeYfiRewards() == 0
     assert (
-        pytest.approx(yfi.balanceOf(whale), rel=10e-3)
-        == yfi_to_distribute / (14 * 24) / 2
+        pytest.approx(gauge.snapshotBalanceOf(whale))
+        == gauge.boostedBalanceOf(whale)
+        == (0.1 * lp_amount)
+        + (lp_amount * ve_yfi.balanceOf(whale) / ve_yfi.totalSupply() * 0.9)
     )
-    assert (
-        pytest.approx(gauge.queuedPenalty(), rel=10e-3)
-        == yfi_to_distribute / (14 * 24) / 2
-    )
-    assert yfi.balanceOf(ve_yfi_rewards) == 0
-    chain.pending_timestamp += 3600 * 24
-    tx = gauge.transferQueuedPenalty(sender=panda)
-    current_begning_of_week = int(chain.pending_timestamp / (86400 * 14)) * 86400 * 14
-
-    assert yfi.balanceOf(ve_yfi_rewards) == ve_yfi_rewards.tokens_per_week(
-        current_begning_of_week
-    )
-    assert (
-        yfi.balanceOf(ve_yfi_rewards)
-        == next(tx.decode_logs(ve_yfi_rewards.CheckpointToken)).tokens
-    )
-    assert gauge.queuedPenalty() == 0
 
 
 def test_gauge_get_reward_for(
@@ -222,12 +173,20 @@ def test_gauge_get_reward_for(
     gauge.queueNewRewards(yfi_to_distribute, sender=gov)
     assert pytest.approx(gauge.rewardRate()) == yfi_to_distribute / (14 * 24 * 3600)
     chain.pending_timestamp += 3600
-    gauge.getRewardFor(whale, False, sender=shark)
+    with ape.reverts("not allowed to claim"):
+        gauge.getRewardFor(whale, False, True, sender=shark)
+
+    gauge.setApprovals(shark, False, True, False, sender=whale)
+
+    with ape.reverts("not allowed to lock"):
+        gauge.getRewardFor(whale, True, True, sender=shark)
+
+    gauge.getRewardFor(whale, False, True, sender=shark)
 
     assert pytest.approx(yfi.balanceOf(whale), rel=5 * 10e-4) == yfi_to_distribute / (
         14 * 24
     )
-    assert gauge.queuedPenalty() == 0
+    assert gauge.queuedVeYfiRewards() == 0
     assert gauge.queuedRewards() == 0
 
 
@@ -262,6 +221,10 @@ def test_deposit_for(
 
     vault.mint(shark, lp_amount, sender=gov)
     vault.approve(gauge, lp_amount, sender=shark)
+    with ape.reverts("not allowed"):
+        gauge.depositFor(whale, lp_amount, sender=shark)
+
+    gauge.setApprovals(shark, True, False, False, sender=whale)
     gauge.depositFor(whale, lp_amount, sender=shark)
     assert gauge.totalSupply() == 10**18
     assert gauge.balanceOf(whale) == 10**18
@@ -287,7 +250,7 @@ def test_deposit_for(
     assert pytest.approx(yfi.balanceOf(whale), rel=5 * 10e-4) == yfi_to_distribute / (
         14 * 24
     )
-    assert gauge.queuedPenalty() == 0
+    assert gauge.queuedVeYfiRewards() == 0
     assert gauge.queuedRewards() == 0
 
 
@@ -322,16 +285,14 @@ def test_withdraw(yfi, ve_yfi, whale, whale_amount, create_vault, create_gauge, 
     assert pytest.approx(yfi.balanceOf(whale), rel=5 * 10e-4) == yfi_to_distribute / (
         14 * 24
     )
-    assert gauge.queuedPenalty() == 0
+    assert gauge.queuedVeYfiRewards() == 0
     assert gauge.queuedRewards() == 0
 
 
 def test_gauge_yfi_distribution_no_more_ve_yfi(
     yfi, ve_yfi, whale, whale_amount, create_vault, create_gauge, gov
 ):
-    # we create a big lock compared to what whale will deposit so he doesn't have a boost.
-    # User should also suffer penalty since he only locked for a year but after veYFI unlocks
-    #  the boost and the penalty meachnisms are removed.
+    # The boost is still valid untill next claim despite the veYFI locked being removed.
     yfi.transfer(gov, whale_amount - 1, sender=whale)
     yfi.approve(ve_yfi, whale_amount - 1, sender=gov)
     ve_yfi.create_lock(
@@ -365,11 +326,14 @@ def test_gauge_yfi_distribution_no_more_ve_yfi(
 
     gauge.getReward(sender=whale)
 
-    assert pytest.approx(yfi.balanceOf(whale), rel=5 * 10e-4) == yfi_to_distribute / (
-        14 * 24
+    assert (
+        pytest.approx(yfi.balanceOf(whale), rel=5 * 10e-4)
+        == yfi_to_distribute / (14 * 24) / 10
     )
-    assert gauge.queuedPenalty() == 0
-    assert gauge.queuedRewards() == 0
+    assert (
+        pytest.approx(gauge.queuedVeYfiRewards(), rel=10e-3)
+        == yfi_to_distribute / (14 * 24) * 0.9
+    )
 
 
 def test_claim_and_lock_rewards(
@@ -399,4 +363,40 @@ def test_claim_and_lock_rewards(
     assert (
         ve_yfi.locked(whale)[0]
         == whale_amount + next(tx.decode_logs(gauge.RewardPaid)).reward
+    )
+
+
+def test_kick(create_vault, create_gauge, whale_amount, panda, yfi, ve_yfi, whale, gov):
+    lp_amount = 10**18
+    vault = create_vault()
+    gauge = create_gauge(vault)
+
+    yfi.approve(ve_yfi, whale_amount, sender=whale)
+    ve_yfi.create_lock(
+        whale_amount, chain.pending_timestamp + 4 * 3600 * 24 * 365, sender=whale
+    )
+
+    yfi.mint(panda, whale_amount, sender=panda)
+    yfi.approve(ve_yfi, whale_amount, sender=panda)
+    ve_yfi.create_lock(
+        whale_amount, chain.pending_timestamp + 4 * 3600 * 24 * 365, sender=panda
+    )
+
+    vault.mint(whale, lp_amount, sender=whale)
+    vault.mint(panda, lp_amount, sender=panda)
+
+    vault.approve(gauge, lp_amount, sender=whale)
+    vault.approve(gauge, lp_amount, sender=panda)
+
+    gauge.deposit(sender=panda)
+    gauge.deposit(sender=whale)
+    assert gauge.snapshotBalanceOf(whale) == gauge.boostedBalanceOf(whale)
+    gauge.withdraw(int(lp_amount / 100), False, False, sender=panda)
+    assert gauge.snapshotBalanceOf(whale) != gauge.boostedBalanceOf(whale)
+    gauge.kick(whale, sender=panda)
+
+    assert (
+        gauge.snapshotBalanceOf(whale)
+        == gauge.boostedBalanceOf(whale)
+        != gauge.balanceOf(whale)
     )
